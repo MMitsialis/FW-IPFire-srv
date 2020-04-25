@@ -200,25 +200,6 @@ END
 END
 	}
 
-	my $dns_servers;
-	if ( -e "${General::swroot}/red/dns" ) {
-		open (TMP, "<${General::swroot}/red/dns");
-		$dns_servers = <TMP>;
-		chomp($dns_servers);
-		close TMP;
-	}
-	print <<END;
-		<tr>
-			<td>
-				<b><a href="netexternal.cgi">$Lang::tr{'dns servers'}</a>:</b>
-			</td>
-			<td style='text-align:center;'>
-				$dns_servers
-			</td>
-			<td></td>
-		</tr>
-END
-
 	if (&General::RedIsWireless()) {
 		my $iface = $netsettings{"RED_DEV"} || "red0";
 
@@ -367,13 +348,12 @@ END
 	}
 #check if IPSEC is running
 if ( $vpnsettings{'ENABLED'} eq 'on' || $vpnsettings{'ENABLED_BLUE'} eq 'on' ) {
-	my $ipsecip = $vpnsettings{'VPN_IP'};
 print<<END;
 		<tr>
 			<td style='width:25%; text-align:center; background-color:$Header::colourvpn;'>
 				<a href='/cgi-bin/vpnmain.cgi' style='color:white'><b>$Lang::tr{'ipsec'}</b></a>
 			</td>
-			<td style='width:30%; text-align:center;'>$ipsecip</td>
+			<td style='width:30%; text-align:center;'></td>
 			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>Online</td>
 		</tr>
 END
@@ -465,6 +445,10 @@ END
 
 				my $activecolor = $Header::colourred;
 				my $activestatus = $Lang::tr{'capsclosed'};
+				if ($vpnconfig{$key}[33] eq "add") {
+					$activecolor = ${Header::colourorange};
+					$activestatus = $Lang::tr{'vpn wait'};
+				}
 				if ($vpnconfig{$key}[0] eq 'off') {
 					$activecolor = $Header::colourblue;
 					$activestatus = $Lang::tr{'capsclosed'};

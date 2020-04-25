@@ -28,6 +28,7 @@ use CGI::Carp 'fatalsToBrowser';
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+require '/opt/pakfire/lib/functions.pl';
 
 my $configfile = "/var/ipfire/main/send_profile";
 
@@ -84,23 +85,23 @@ if ($errormessage) {
 }
 
 my $ipfire_version = `cat /etc/system-release`;
-my $pakfire_version = `cat /opt/pakfire/etc/pakfire.conf | grep "version =" | cut -d\\" -f2`;
+my $pakfire_version = &Pakfire::make_version();
 my $kernel_version = `uname -a`;
 
 &Header::openbox('100%', 'left', $Lang::tr{'fireinfo system version'});
 print <<END;
-	<table width="100%">
+	<table cellspacing='1' cellpadding='0' class='tbl'>
 		<tr>
-			<td>$Lang::tr{'fireinfo ipfire version'}:</td>
-			<td>$ipfire_version</td>
+			<td align='center' bgcolor='#F0F0F0' width='15%'>$Lang::tr{'fireinfo ipfire version'}</td>
+			<td bgcolor='#F0F0F0'><code>$ipfire_version</code></td>
 		</tr>
 		<tr>
-			<td>$Lang::tr{'fireinfo pakfire version'}:</td>
-			<td>$pakfire_version</td>
+			<td align='center' bgcolor='#D6D6D6' width='15%'>$Lang::tr{'fireinfo pakfire version'}</td>
+			<td bgcolor='#D6D6D6'><code>$pakfire_version</code></td>
 		</tr>
 		<tr>
-			<td>$Lang::tr{'fireinfo kernel version'}:</td>
-			<td>$kernel_version</td>
+			<td align='center' bgcolor='#F0F0F0' width='15%'>$Lang::tr{'fireinfo kernel version'}</td>
+			<td bgcolor='#F0F0F0'><code>$kernel_version</code></td>
 		</tr>
 	</table>
 END

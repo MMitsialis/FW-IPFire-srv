@@ -59,74 +59,88 @@ print <<END
 <br><br>
 
 <p>
-	<strong>Core Developers:</strong>
+	<!-- CONTRIBUTORS -->
+Michael Tremer,
+Arne Fitzenreiter,
+Christian Schmidt,
+Alexander Marx,
+Stefan Schantl,
+Matthias Fischer,
+Peter Müller,
+Jan Paul Tücking,
+Jonatan Schlag,
+Erik Kapfer,
+Dirk Wagner,
+Marcel Lorenz,
+Alf Høgemark,
+Ben Schweikert,
+Peter Pfeiffer,
+Daniel Glanzmann,
+Daniel Weismüller,
+Heiner Schmeling,
+Timo Eissler,
+Jan Lentfer,
+Marcus Scholz,
+Ersan Yildirim,
+Stephan Feddersen,
+Joern-Ingo Weigert,
+Alexander Koch,
+Stéphane Pautrel,
+Wolfgang Apolinarski,
+Alfred Haas,
+Lars Schuhmacher,
+Rene Zingel,
+Sascha Kilian,
+Ronald Wiesinger,
+Florian Bührle,
+Bernhard Bitsch,
+Justin Luth,
+Michael Eitelwein,
+Alex Koch,
+Dominik Hassler,
+Larsen,
+Gabriel Rolland,
+Tim FitzGeorge,
+Anton D. Seliverstov,
+Bernhard Bittner,
+David Kleuker,
+Hans Horsten,
+Jakub Ratajczak,
+Jorrit de Jonge,
+Jörn-Ingo Weigert,
+Przemek Zdroik,
+Ramax Lo,
+Alexander Rudolf Gruber,
+Andrew Bellows,
+Axel Gembe,
+Bernhard Held,
+Christoph Anderegg,
+Daniel Aleksandersen,
+Douglas Duckworth,
+Eberhard Beilharz,
+Ersan Yildirim Ersan,
+Gerd Hoerst,
+H. Horsten,
+Heino Gutschmidt,
+Jan Behrens,
+Jochen Kauz,
+Julian McConnell,
+Kay-Michael Köhler,
+Kim Wölfel,
+Logan Schmidt,
+Nico Prenzel,
+Oliver Fuhrer,
+Osmar Gonzalez,
+Paul T. Simmons,
+Rob Brewer,
+Robert Möker,
+Stefan Ernst,
+Stefan Ferstl,
+Thomas Ebert,
+Timmothy Wilson,
+Umberto Parma
+	<!-- END -->
 </p>
-
-<ul style="list-style: none">
-	<li>
-		Michael Tremer
-		(<a href='mailto:michael.tremer\@ipfire.org'>michael.tremer\@ipfire.org</a>)
-	</li>
-	<li>
-		Arne Fitzenreiter
-		(<a href='mailto:arne.fitzenreiter\@ipfire.org'>arne.fitzenreiter\@ipfire.org</a>)
-	</li>
-	<li>
-		Stefan Schantl
-		(<a href='mailto:stefan.schantl\@ipfire.org'>stefan.schantl\@ipfire.org</a>)
-	</li>
-	<li>
-		Alexander Marx
-		(<a href='mailto:alexander.marx\@ipfire.org'>alexander.marx\@ipfire.org</a>)
-	</li>
-</ul>
-
-<p>
-	<strong>Community Developers:</strong>
-</p>
-
-<ul style="list-style: none">
-	<li>
-		Christian Schmidt
-		(<a href='mailto:christian.schmidt\@ipfire.org'>christian.schmidt\@ipfire.org</a>)
-	</li>
-	<li>
-		Jan Paul T&uuml;cking
-		(<a href='mailto:jan.tuecking\@ipfire.org'>jan.tuecking\@ipfire.org</a>)
-	</li>
-	<li>
-		Heiner Schmeling
-		(<a href='mailto:heiner.schmeling\@ipfire.org'>heiner.schmeling\@ipfire.org</a>)
-	</li>
-	<li>
-		Ronald Wiesinger
-		(<a href='mailto:ronald.wiesinger\@ipfire.org'>ronald.wiesinger\@ipfire.org</a>)
-	</li>
-	<li>
-		Silvio Rechenbach
-		(<a href='mailto:silvio.rechenbach\@ipfire.org'>silvio.rechenbach\@ipfire.org</a>)
-	</li>
-	<li>
-		Dirk Wagner
-		(<a href='mailto:dirk.wagner\@ipfire.org'>dirk.wagner\@ipfire.org</a>)
-	</li>
-	<li>
-		Erik Kapfer
-		(<a href='mailto:erik.kapfer\@ipfire.org'>erik.kapfer\@ipfire.org</a>)
-	</li>
-	<li>
-		Alfred Haas
-		(<a href='mailto:alfred.haas\@ipfire.org'>alfred.haas\@ipfire.org</a>)
-	</li>
-	<li>
-		Peter Pfeiffer
-		(<a href='mailto:peter.pfeifer\@ipfire.org'>peter.pfeifer\@ipfire.org</a>)
-	</li>
-	<li>
-		Peter Sch&auml;lchli
-		(<a href='mailto:peter.schaelchli\@ipfire.org'>peter.schaelchli\@ipfire.org</a>)
-	</li>
-</ul>
 END
 ;
 &Header::closebox();

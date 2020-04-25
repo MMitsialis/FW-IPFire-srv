@@ -23,6 +23,7 @@ use strict;
 use Sort::Naturally;
 use utf8;
 use feature 'unicode_strings';
+use experimental 'smartmatch';
 
 no warnings 'uninitialized';
 
@@ -240,10 +241,6 @@ if ($fwdfwsettings{'ACTION'} eq 'saverule')
 		if ( &General::IpInSubnet($sip,$netsettings{'ORANGE_ADDRESS'},$netsettings{'ORANGE_NETMASK'})){
 			$checkorange='on';
 		}
-	}
-	#check useless rules
-	if(	($fwdfwsettings{$fwdfwsettings{'grp1'}} eq 'ORANGE' || $checkorange eq 'on') && $fwdfwsettings{'grp2'} eq 'ipfire'){
-		$errormessage.=$Lang::tr{'fwdfw useless rule'}."<br>";
 	}
 	#check if we try to break rules
 	if(	$fwdfwsettings{'grp1'} eq 'ipfire_src' && $fwdfwsettings{'grp2'} eq 'ipfire'){
@@ -1722,6 +1719,7 @@ END
 						<td width='25%' align='right'><span class='snat'>$Lang::tr{'snat new source ip address'}:</span></td>
 						<td width='30%'>
 							<select name='snat' class='snat' style='width: 100%;'>
+								<option value='RED' $selected{'snat'}{'RED'}>$Lang::tr{'red1'} ($redip)</option>
 END
 
 		foreach my $alias (sort keys %aliases) {

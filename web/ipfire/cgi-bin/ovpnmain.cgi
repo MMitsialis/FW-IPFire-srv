@@ -64,6 +64,8 @@ my %cahash=();
 my %selected=();
 my $warnmessage = '';
 my $errormessage = '';
+my $cryptoerror = '';
+my $cryptowarning = '';
 my %settings=();
 my $routes_push_file = '';
 my $confighost="${General::swroot}/fwhosts/customhosts";
@@ -97,6 +99,8 @@ $cgiparams{'DCIPHER'} = '';
 $cgiparams{'DAUTH'} = '';
 $cgiparams{'TLSAUTH'} = '';
 $routes_push_file = "${General::swroot}/ovpn/routes_push";
+# Perform crypto and configration test
+&pkiconfigcheck;
 
 # Add CCD files if not already presant
 unless (-e $routes_push_file) {
@@ -170,7 +174,12 @@ sub cleanssldatabase
 	print FILE "";
 	close FILE;
     }
+    if (open(FILE, ">${General::swroot}/ovpn/certs/index.txt.attr")) {
+      print FILE "";
+      close FILE;
+    }
     unlink ("${General::swroot}/ovpn/certs/index.txt.old");
+    unlink ("${General::swroot}/ovpn/certs/index.txt.attr.old");
     unlink ("${General::swroot}/ovpn/certs/serial.old");
     unlink ("${General::swroot}/ovpn/certs/01.pem");
 }
@@ -185,7 +194,11 @@ sub newcleanssldatabase
     if (! -s ">${General::swroot}/ovpn/certs/index.txt") {
 	system ("touch ${General::swroot}/ovpn/certs/index.txt");
     }
+    if (! -s ">${General::swroot}/ovpn/certs/index.txt.attr") {
+      system ("touch ${General::swroot}/ovpn/certs/index.txt.attr");
+    }
     unlink ("${General::swroot}/ovpn/certs/index.txt.old");
+    unlink ("${General::swroot}/ovpn/certs/index.txt.attr.old");
     unlink ("${General::swroot}/ovpn/certs/serial.old");
 }
 
@@ -197,6 +210,45 @@ sub deletebackupcert
 		close FILE;
 		unlink ("${General::swroot}/ovpn/certs/$hexvalue.pem");
 	}
+}
+
+###
+### Check for PKI and configure problems
+###
+
+sub pkiconfigcheck
+{
+	# Warning if DH parameter is 1024 bit
+	if (-f "${General::swroot}/ovpn/ca/$cgiparams{'DH_NAME'}") {
+		my $dhparameter = `/usr/bin/openssl dhparam -text -in ${General::swroot}/ovpn/ca/$cgiparams{'DH_NAME'}`;
+		my @dhbit = ($dhparameter =~ /(\d+)/);
+		if ($1 < 2048) {
+			$cryptoerror = "$Lang::tr{'ovpn error dh'}";
+			goto CRYPTO_ERROR;
+		}
+	}
+
+	# Warning if md5 is in usage
+	if (-f "${General::swroot}/ovpn/certs/servercert.pem") {
+		my $signature = `/usr/bin/openssl x509 -noout -text -in ${General::swroot}/ovpn/certs/servercert.pem`;
+		if ($signature =~ /md5WithRSAEncryption/) {
+			$cryptoerror = "$Lang::tr{'ovpn error md5'}";
+			goto CRYPTO_ERROR;
+		}
+	}
+
+	CRYPTO_ERROR:
+
+	# Warning if certificate is not compliant to RFC3280 TLS rules
+	if (-f "${General::swroot}/ovpn/certs/servercert.pem") {
+		my $extendkeyusage = `/usr/bin/openssl x509 -noout -text -in ${General::swroot}/ovpn/certs/servercert.pem`;
+		if ($extendkeyusage !~ /TLS Web Server Authentication/) {
+			$cryptowarning = "$Lang::tr{'ovpn warning rfc3280'}";
+			goto CRYPTO_WARNING;
+		}
+	}
+
+	CRYPTO_WARNING:
 }
 
 sub writeserverconf {
@@ -228,7 +280,7 @@ sub writeserverconf {
     print CONF "server $tempovpnsubnet[0] $tempovpnsubnet[1]\n";
     #print CONF "push \"route $netsettings{'GREEN_NETADDRESS'} $netsettings{'GREEN_NETMASK'}\"\n";
 
-    # Check if we are using mssfix, fragment or mtu-disc and set the corretct mtu of 1500.
+    # Check if we are using mssfix, fragment and set the corretct mtu of 1500.
     # If we doesn't use one of them, we can use the configured mtu value.
     if ($sovpnsettings{'MSSFIX'} eq 'on') 
 	{ print CONF "tun-mtu 1500\n"; }
@@ -280,11 +332,8 @@ sub writeserverconf {
     print CONF "status /var/run/ovpnserver.log 30\n";
     print CONF "ncp-disable\n";
     print CONF "cipher $sovpnsettings{DCIPHER}\n";
-    if ($sovpnsettings{'DAUTH'} eq '') {
-        print CONF "";
-    } else {
 	print CONF "auth $sovpnsettings{'DAUTH'}\n";
-    }
+
     if ($sovpnsettings{'TLSAUTH'} eq 'on') {
 	print CONF "tls-auth ${General::swroot}/ovpn/certs/ta.key\n";
     }
@@ -306,10 +355,10 @@ sub writeserverconf {
         print CONF "push \"dhcp-option WINS $sovpnsettings{DHCP_WINS}\"\n";
     }
     
-    if ($sovpnsettings{DHCP_WINS} eq '') {
+    if ($sovpnsettings{MAX_CLIENTS} eq '') {
 	print CONF "max-clients 100\n";
     }
-    if ($sovpnsettings{DHCP_WINS} ne '') {
+    if ($sovpnsettings{MAX_CLIENTS} ne '') {
 	print CONF "max-clients $sovpnsettings{MAX_CLIENTS}\n";
     }	
     print CONF "tls-verify /usr/lib/openvpn/verify\n";
@@ -417,10 +466,7 @@ sub addccdnet
 		$errormessage=$Lang::tr{'ccd err invalidnet'};
 		return;
 	}
-	
-	$errormessage=&General::checksubnets($ccdname,$ccdnet);
-	
-		
+
 	if (!$errormessage) {
 		my %ccdconfhash=();
 		$baseaddress=&General::getnetworkip($ccdip,$subcidr);
@@ -444,6 +490,13 @@ sub modccdnet
 	my $oldname=$_[1];
 	my %ccdconfhash=();
 	my %ccdhash=();
+
+	# Check if the new name is valid.
+	if(!&General::validhostname($newname)) {
+		$errormessage=$Lang::tr{'ccd err invalidname'};
+		return;
+	}
+
 	&General::readhasharray("${General::swroot}/ovpn/ccd.conf", \%ccdconfhash);
 	foreach my $key (keys %ccdconfhash) {
 		if ($ccdconfhash{$key}[0] eq $oldname) {
@@ -739,13 +792,12 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'save-adv-options'}) {
     $vpnsettings{'MAX_CLIENTS'} = $cgiparams{'MAX_CLIENTS'};
     $vpnsettings{'REDIRECT_GW_DEF1'} = $cgiparams{'REDIRECT_GW_DEF1'};
     $vpnsettings{'CLIENT2CLIENT'} = $cgiparams{'CLIENT2CLIENT'};
+    $vpnsettings{'DCOMPLZO'} = $cgiparams{'DCOMPLZO'};
     $vpnsettings{'ADDITIONAL_CONFIGS'} = $cgiparams{'ADDITIONAL_CONFIGS'};
     $vpnsettings{'DHCP_DOMAIN'} = $cgiparams{'DHCP_DOMAIN'};
     $vpnsettings{'DHCP_DNS'} = $cgiparams{'DHCP_DNS'};
     $vpnsettings{'DHCP_WINS'} = $cgiparams{'DHCP_WINS'};
     $vpnsettings{'ROUTES_PUSH'} = $cgiparams{'ROUTES_PUSH'};
-    $vpnsettings{'DAUTH'} = $cgiparams{'DAUTH'};
-    $vpnsettings{'TLSAUTH'} = $cgiparams{'TLSAUTH'};
     my @temp=();
     
     if ($cgiparams{'FRAGMENT'} eq '') {
@@ -853,17 +905,6 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'save-adv-options'}) {
         $errormessage = $Lang::tr{'invalid input for keepalive 1:2'};
         goto ADV_ERROR;	
     }
-    # Create ta.key for tls-auth if not presant
-    if ($cgiparams{'TLSAUTH'} eq 'on') {
-	if ( ! -e "${General::swroot}/ovpn/certs/ta.key") {
-		system('/usr/sbin/openvpn', '--genkey', '--secret', "${General::swroot}/ovpn/certs/ta.key");
-		if ($?) {
-		$errormessage = "$Lang::tr{'openssl produced an error'}: $?";
-        goto ADV_ERROR;
-		}
-	}
-    }
-    
     &General::writehash("${General::swroot}/ovpn/settings", \%vpnsettings);
     &writeserverconf();#hier ok
 }
@@ -1069,7 +1110,7 @@ unless(-d "${General::swroot}/ovpn/n2nconf/$cgiparams{'NAME'}"){mkdir "${General
   close(CLIENTCONF);
 
 }
-  
+
 ###
 ### Save main settings
 ###
@@ -1144,6 +1185,17 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'save'} && $cgiparams{'TYPE'} eq '' && $cg
 	goto SETTINGS_ERROR;
     }
 
+	# Create ta.key for tls-auth if not presant
+	if ($cgiparams{'TLSAUTH'} eq 'on') {
+		if ( ! -e "${General::swroot}/ovpn/certs/ta.key") {
+			system('/usr/sbin/openvpn', '--genkey', '--secret', "${General::swroot}/ovpn/certs/ta.key");
+			if ($?) {
+				$errormessage = "$Lang::tr{'openssl produced an error'}: $?";
+				goto SETTINGS_ERROR;
+			}
+		}
+	}
+
     $vpnsettings{'ENABLED_BLUE'} = $cgiparams{'ENABLED_BLUE'};
     $vpnsettings{'ENABLED_ORANGE'} =$cgiparams{'ENABLED_ORANGE'};
     $vpnsettings{'ENABLED'} = $cgiparams{'ENABLED'};
@@ -1155,6 +1207,8 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'save'} && $cgiparams{'TYPE'} eq '' && $cg
     $vpnsettings{'DMTU'} = $cgiparams{'DMTU'};
     $vpnsettings{'DCOMPLZO'} = $cgiparams{'DCOMPLZO'};
     $vpnsettings{'DCIPHER'} = $cgiparams{'DCIPHER'};
+    $vpnsettings{'DAUTH'} = $cgiparams{'DAUTH'};
+    $vpnsettings{'TLSAUTH'} = $cgiparams{'TLSAUTH'};
 #wrtie enable
 
   if ( $vpnsettings{'ENABLED_BLUE'} eq 'on' ) {system("touch ${General::swroot}/ovpn/enable_blue 2>/dev/null");}else{system("unlink ${General::swroot}/ovpn/enable_blue 2>/dev/null");}
@@ -1181,7 +1235,7 @@ SETTINGS_ERROR:
 	    delete $confighash{$cgiparams{'$key'}};
 	}
 
-	system ("/usr/local/bin/openvpnctrl -drrd $name");
+	system ("/usr/local/bin/openvpnctrl -drrd $name &>/dev/null");
     }
     while ($file = glob("${General::swroot}/ovpn/ca/*")) {
 	unlink $file;
@@ -1291,7 +1345,6 @@ END
 		<form method='post'><input type='hidden' name='AREUSURE' value='yes' />
 		<input type='hidden' name='KEY' value='$cgiparams{'KEY'}' />
 			<select name='DHLENGHT'>
-				<option value='1024' $selected{'DHLENGHT'}{'1024'}>1024 $Lang::tr{'bit'} ($Lang::tr{'vpn weak'})</option>
 				<option value='2048' $selected{'DHLENGHT'}{'2048'}>2048 $Lang::tr{'bit'}</option>
 				<option value='3072' $selected{'DHLENGHT'}{'3072'}>3072 $Lang::tr{'bit'}</option>
 				<option value='4096' $selected{'DHLENGHT'}{'4096'}>4096 $Lang::tr{'bit'}</option>
@@ -1326,7 +1379,7 @@ END
 ### Upload DH key
 ###
 } elsif ($cgiparams{'ACTION'} eq $Lang::tr{'upload dh key'}) {
-    if (ref ($cgiparams{'FH'}) ne 'Fh') {
+    unless (ref ($cgiparams{'FH'})) {
          $errormessage = $Lang::tr{'there was no file upload'};
          goto UPLOADCA_ERROR;
     }
@@ -1337,7 +1390,7 @@ END
 	goto UPLOADCA_ERROR;
     }
     my $temp = `/usr/bin/openssl dhparam -text -in $filename`;
-    if ($temp !~ /DH Parameters: \((1024|2048|3072|4096) bit\)/) {
+    if ($temp !~ /DH Parameters: \((2048|3072|4096) bit\)/) {
         $errormessage = $Lang::tr{'not a valid dh key'};
         unlink ($filename);
         goto UPLOADCA_ERROR;
@@ -1383,7 +1436,7 @@ END
 	}
     }
 
-    if (ref ($cgiparams{'FH'}) ne 'Fh') {
+    unless (ref ($cgiparams{'FH'})) {
 	$errormessage = $Lang::tr{'there was no file upload'};
 	goto UPLOADCA_ERROR;
     }
@@ -1616,8 +1669,7 @@ END
 	    }
 	}
     } elsif ($cgiparams{'ACTION'} eq $Lang::tr{'upload p12 file'}) {
-
-	if (ref ($cgiparams{'FH'}) ne 'Fh') {
+	unless (ref ($cgiparams{'FH'})) {
 	    $errormessage = $Lang::tr{'there was no file upload'};
 	    goto ROOTCERT_ERROR;
 	}
@@ -1901,6 +1953,13 @@ END
 #	} else {
 #	    &cleanssldatabase();
 	}
+	# Create ta.key for tls-auth
+	system('/usr/sbin/openvpn', '--genkey', '--secret', "${General::swroot}/ovpn/certs/ta.key");
+	if ($?) {
+	    $errormessage = "$Lang::tr{'openssl produced an error'}: $?";
+	    &cleanssldatabase();
+	    goto ROOTCERT_ERROR;
+	}
 	# Create Diffie Hellmann Parameter
 	system('/usr/bin/openssl', 'dhparam', '-out', "${General::swroot}/ovpn/ca/dh1024.pem", "$cgiparams{'DHLENGHT'}");
 	if ($?) {
@@ -1914,13 +1973,6 @@ END
 	    goto ROOTCERT_ERROR;
 #	} else {
 #	    &cleanssldatabase();
-	}
-	# Create ta.key for tls-auth
-	system('/usr/sbin/openvpn', '--genkey', '--secret', "${General::swroot}/ovpn/certs/ta.key");
-	if ($?) {
-	    $errormessage = "$Lang::tr{'openssl produced an error'}: $?";
-	    &cleanssldatabase();
-	    goto ROOTCERT_ERROR;
 	}
 	goto ROOTCERT_SUCCESS;
     }
@@ -1973,7 +2025,6 @@ END
 	    </select></td>
 	<tr><td class='base'>$Lang::tr{'ovpn dh'}:</td>
 		<td class='base'><select name='DHLENGHT'>
-				<option value='1024' $selected{'DHLENGHT'}{'1024'}>1024 $Lang::tr{'bit'} ($Lang::tr{'vpn weak'}</option>
 				<option value='2048' $selected{'DHLENGHT'}{'2048'}>2048 $Lang::tr{'bit'}</option>
 				<option value='3072' $selected{'DHLENGHT'}{'3072'}>3072 $Lang::tr{'bit'}</option>
 				<option value='4096' $selected{'DHLENGHT'}{'4096'}>4096 $Lang::tr{'bit'}</option>
@@ -2142,15 +2193,6 @@ if ($confighash{$cgiparams{'KEY'}}[3] eq 'net'){
    if ($confighash{$cgiparams{'KEY'}}[24] ne '') {print CLIENTCONF "fragment $confighash{$cgiparams{'KEY'}}[24]\n";}
    if ($confighash{$cgiparams{'KEY'}}[23] eq 'on') {print CLIENTCONF "mssfix\n";}
    }
-   if (($confighash{$cgiparams{'KEY'}}[38] eq 'yes') ||
-       ($confighash{$cgiparams{'KEY'}}[38] eq 'maybe') ||
-       ($confighash{$cgiparams{'KEY'}}[38] eq 'no' )) {
-	if (($confighash{$cgiparams{'KEY'}}[23] ne 'on') || ($confighash{$cgiparams{'KEY'}}[24] eq '')) {
-		if ($tunmtu eq '1500' ) {
-			print CLIENTCONF "mtu-disc $confighash{$cgiparams{'KEY'}}[38]\n";
-		}
-	}
-   }
    # Check host certificate if X509 is RFC3280 compliant.
    # If not, old --ns-cert-type directive will be used.
    # If appropriate key usage extension exists, new --remote-cert-tls directive will be used.
@@ -2231,7 +2273,7 @@ else
     print CLIENTCONF "dev tun\r\n";
     print CLIENTCONF "proto $vpnsettings{'DPROTOCOL'}\r\n";
 
-    # Check if we are using fragment, mssfix or mtu-disc and set MTU to 1500
+    # Check if we are using fragment, mssfix and set MTU to 1500
     # or use configured value.
     if ($vpnsettings{FRAGMENT} ne '' && $vpnsettings{DPROTOCOL} ne 'tcp' )
 	{ print CLIENTCONF "tun-mtu 1500\r\n"; }
@@ -2303,11 +2345,8 @@ else
 	$zip->addFile( "${General::swroot}/ovpn/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem", "$confighash{$cgiparams{'KEY'}}[1]cert.pem") or die "Can't add file $confighash{$cgiparams{'KEY'}}[1]cert.pem\n";    
     }
     print CLIENTCONF "cipher $vpnsettings{DCIPHER}\r\n";
-    if ($vpnsettings{'DAUTH'} eq '') {
-        print CLIENTCONF "";
-    } else {
 	print CLIENTCONF "auth $vpnsettings{'DAUTH'}\r\n";
-    }
+
     if ($vpnsettings{'TLSAUTH'} eq 'on') {
 	if ($cgiparams{'MODE'} eq 'insecure') {
 		print CLIENTCONF ";";
@@ -2432,7 +2471,7 @@ else
 
 		if ($confighash{$cgiparams{'KEY'}}[3] eq 'net') {
 			# Stop the N2N connection before it is removed
-			system("/usr/local/bin/openvpnctrl -kn2n $confighash{$cgiparams{'KEY'}}[1] &>/dev/null");
+			system('/usr/local/bin/openvpnctrl', '-kn2n', $confighash{$cgiparams{'KEY'}}[1]);
 
 			my $conffile = glob("${General::swroot}/ovpn/n2nconf/$confighash{$cgiparams{'KEY'}}[1]/$confighash{$cgiparams{'KEY'}}[1].conf");
 			my $certfile = glob("${General::swroot}/ovpn/certs/$confighash{$cgiparams{'KEY'}}[1].p12");
@@ -2474,7 +2513,7 @@ else
 # CCD end
 		# Update collectd configuration and delete all RRD files of the removed connection
 		&writecollectdconf();
-		system ("/usr/local/bin/openvpnctrl -drrd $confighash{$cgiparams{'KEY'}}[1]");
+		system ('/usr/local/bin/openvpnctrl', '-drrd', $confighash{$cgiparams{'KEY'}}[1]);
 
 		delete $confighash{$cgiparams{'KEY'}};
 		my $temp2 = `/usr/bin/openssl ca -gencrl -out ${General::swroot}/ovpn/crls/cacrl.pem -config ${General::swroot}/ovpn/openssl/ovpn.cnf`;
@@ -2613,9 +2652,6 @@ ADV_ERROR:
     if ($cgiparams{'LOG_VERB'} eq '') {
 		$cgiparams{'LOG_VERB'} =  '3';
     }
-    if ($cgiparams{'DAUTH'} eq '') {
-		$cgiparams{'DAUTH'} = 'SHA512';
-    }
     if ($cgiparams{'TLSAUTH'} eq '') {
 		$cgiparams{'TLSAUTH'} = 'off';
     }
@@ -2625,6 +2661,9 @@ ADV_ERROR:
     $checked{'REDIRECT_GW_DEF1'}{'off'} = '';
     $checked{'REDIRECT_GW_DEF1'}{'on'} = '';
     $checked{'REDIRECT_GW_DEF1'}{$cgiparams{'REDIRECT_GW_DEF1'}} = 'CHECKED';
+    $checked{'DCOMPLZO'}{'off'} = '';
+    $checked{'DCOMPLZO'}{'on'} = '';
+    $checked{'DCOMPLZO'}{$cgiparams{'DCOMPLZO'}} = 'CHECKED';
     $checked{'ADDITIONAL_CONFIGS'}{'off'} = '';
     $checked{'ADDITIONAL_CONFIGS'}{'on'} = '';
     $checked{'ADDITIONAL_CONFIGS'}{$cgiparams{'ADDITIONAL_CONFIGS'}} = 'CHECKED';
@@ -2644,15 +2683,6 @@ ADV_ERROR:
     $selected{'LOG_VERB'}{'10'} = '';
     $selected{'LOG_VERB'}{'11'} = '';
     $selected{'LOG_VERB'}{$cgiparams{'LOG_VERB'}} = 'SELECTED';
-    $selected{'DAUTH'}{'whirlpool'} = '';
-    $selected{'DAUTH'}{'SHA512'} = '';
-    $selected{'DAUTH'}{'SHA384'} = '';
-    $selected{'DAUTH'}{'SHA256'} = '';
-    $selected{'DAUTH'}{'SHA1'} = '';
-    $selected{'DAUTH'}{$cgiparams{'DAUTH'}} = 'SELECTED';
-    $checked{'TLSAUTH'}{'off'} = '';
-    $checked{'TLSAUTH'}{'on'} = '';
-    $checked{'TLSAUTH'}{$cgiparams{'TLSAUTH'}} = 'CHECKED';
    
     &Header::showhttpheaders();
     &Header::openpage($Lang::tr{'status ovpn'}, 1, '');
@@ -2712,7 +2742,7 @@ print <<END;
 	</tr>
 
 	<tr>
-		<td width='20%'></td> <td width='15%'> </td><td width='15%'> </td><td width='15%'></td><td width='35%'></td>
+		<td width='20%'></td> <td width='15%'> </td><td width='35%'> </td><td width='20%'></td><td width='35%'></td>
 	</tr>
 
 	<tr>
@@ -2724,6 +2754,11 @@ print <<END;
 		<td class='base'>Redirect-Gateway def1</td>
 		<td><input type='checkbox' name='REDIRECT_GW_DEF1' $checked{'REDIRECT_GW_DEF1'}{'on'} /></td>
 	</tr>
+
+    <tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'comp-lzo'}</td>
+        <td><input type='checkbox' name='DCOMPLZO' $checked{'DCOMPLZO'}{'on'} /></td>
+        <td>$Lang::tr{'openvpn default'}: off <font color='red'>($Lang::tr{'attention'} exploitable via Voracle)</font></td>
+    </tr>
 
 	<tr>
 		<td class='base'>$Lang::tr{'ovpn add conf'}</td>
@@ -2782,36 +2817,6 @@ print <<END;
     </table>
 
 <hr size='1'>
-<table width='100%'>
-    <tr>
-		<td class'base'><b>$Lang::tr{'ovpn crypt options'}</b></td>
-	</tr>
-	<tr>
-		<td width='20%'></td> <td width='30%'> </td><td width='25%'> </td><td width='25%'></td>
-    </tr>	
-    <tr><td class='base'>$Lang::tr{'ovpn ha'}</td>
-		<td><select name='DAUTH'>
-				<option value='whirlpool'		$selected{'DAUTH'}{'whirlpool'}>Whirlpool (512 $Lang::tr{'bit'})</option>
-				<option value='SHA512'			$selected{'DAUTH'}{'SHA512'}>SHA2 (512 $Lang::tr{'bit'})</option>
-				<option value='SHA384'			$selected{'DAUTH'}{'SHA384'}>SHA2 (384 $Lang::tr{'bit'})</option>
-				<option value='SHA256'			$selected{'DAUTH'}{'SHA256'}>SHA2 (256 $Lang::tr{'bit'})</option>
-				<option value='SHA1'			$selected{'DAUTH'}{'SHA1'}>SHA1 (160 $Lang::tr{'bit'}, $Lang::tr{'vpn weak'})</option>
-			</select>
-		</td>
-		<td>$Lang::tr{'openvpn default'}: <span class="base">SHA1 (160 $Lang::tr{'bit'})</span></td>
-    </tr>
-</table>
-
-<table width='100%'>
-    <tr>
-	<td width='20%'></td> <td width='15%'> </td><td width='15%'> </td><td width='15%'></td><td width='35%'></td>
-    </tr>
-
-    <tr>
-	<td class='base'>HMAC tls-auth</td>
-	<td><input type='checkbox' name='TLSAUTH' $checked{'TLSAUTH'}{'on'} /></td>
-    </tr>
-    </table><hr>
 END
 
 if ( -e "/var/run/openvpn.pid"){
@@ -3219,9 +3224,8 @@ END
 
 	&General::readhasharray("${General::swroot}/ovpn/ovpnconfig", \%confighash);	
 
-# Check if a file is uploaded
-
-	if (ref ($cgiparams{'FH'}) ne 'Fh') {
+	# Check if a file is uploaded
+	unless (ref ($cgiparams{'FH'})) {
 		$errormessage = $Lang::tr{'there was no file upload'};
 		goto N2N_ERROR;
     }
@@ -3337,7 +3341,6 @@ my $complzoactive;
 my $mssfixactive;
 my $authactive;
 my $n2nfragment;
-my @n2nmtudisc = split(/ /, (grep { /^mtu-disc/ } @firen2nconf)[0]);
 my @n2nproto2 = split(/ /, (grep { /^proto/ } @firen2nconf)[0]);
 my @n2nproto = split(/-/, $n2nproto2[1]);
 my @n2nport = split(/ /, (grep { /^port/ } @firen2nconf)[0]);
@@ -3373,7 +3376,6 @@ $n2nremsub[2] =~ s/\n|\r//g;
 $n2nlocalsub[2] =~ s/\n|\r//g;
 $n2nfragment[1] =~ s/\n|\r//g;
 $n2nmgmt[2] =~ s/\n|\r//g;
-$n2nmtudisc[1] =~ s/\n|\r//g;
 $n2ncipher[1] =~ s/\n|\r//g;
 $n2nauth[1] =~ s/\n|\r//g;
 chomp ($complzoactive);
@@ -3450,7 +3452,6 @@ foreach my $dkey (keys %confighash) {
 	$confighash{$key}[29] = $n2nport[1];
 	$confighash{$key}[30] = $complzoactive;
 	$confighash{$key}[31] = $n2ntunmtu[1];
-	$confighash{$key}[38] = $n2nmtudisc[1];
 	$confighash{$key}[39] = $n2nauth[1];
 	$confighash{$key}[40] = $n2ncipher[1];
 	$confighash{$key}[41] = 'disabled';
@@ -3490,9 +3491,8 @@ foreach my $dkey (keys %confighash) {
 		<tr><td class='boldbase' nowrap='nowrap'>MSSFIX:</td><td><b>$confighash{$key}[23]</b></td></tr>
 		<tr><td class='boldbase' nowrap='nowrap'>Fragment:</td><td><b>$confighash{$key}[24]</b></td></tr>
 		<tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'MTU'}</td><td><b>$confighash{$key}[31]</b></td></tr>
-		<tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'ovpn mtu-disc'}</td><td><b>$confighash{$key}[38]</b></td></tr>
 		<tr><td class='boldbase' nowrap='nowrap'>Management Port </td><td><b>$confighash{$key}[22]</b></td></tr>
-		<tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'ovpn hmac'}:</td><td><b>$confighash{$key}[39]</b></td></tr>
+		<tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'ovpn tls auth'}:</td><td><b>$confighash{$key}[39]</b></td></tr>
 		<tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'cipher'}</td><td><b>$confighash{$key}[40]</b></td></tr>
 		<tr><td>&nbsp;</td><td>&nbsp;</td></tr>	
     </table>
@@ -3980,6 +3980,16 @@ if ($cgiparams{'TYPE'} eq 'net') {
       		goto VPNCONF_ERROR;
 	}
 
+	# Check for N2N that OpenSSL maximum of valid days will not be exceeded
+	if ($cgiparams{'TYPE'} eq 'net') {
+		if ($cgiparams{'DAYS_VALID'} >= '999999') {
+			$errormessage = $Lang::tr{'invalid input for valid till days'};
+			unlink ("${General::swroot}/ovpn/n2nconf/$cgiparams{'NAME'}/$cgiparams{'NAME'}.conf") or die "Removing Configfile fail: $!";
+			rmdir ("${General::swroot}/ovpn/n2nconf/$cgiparams{'NAME'}") || die "Removing Directory fail: $!";
+			goto VPNCONF_ERROR;
+		}
+	}
+
 	if ($cgiparams{'ENABLED'} !~ /^(on|off)$/) {
 	    $errormessage = $Lang::tr{'invalid input'};
 	    goto VPNCONF_ERROR;
@@ -4004,7 +4014,7 @@ if ($cgiparams{'TYPE'} eq 'net') {
 		$errormessage = $Lang::tr{'cant change certificates'};
 		goto VPNCONF_ERROR;
 	    }
-	    if (ref ($cgiparams{'FH'}) ne 'Fh') {
+	    unless (ref ($cgiparams{'FH'})) {
 		$errormessage = $Lang::tr{'there was no file upload'};
 		goto VPNCONF_ERROR;
 	    }
@@ -4035,7 +4045,7 @@ if ($cgiparams{'TYPE'} eq 'net') {
 	    }
 
 	    my $temp = `/usr/bin/openssl x509 -text -in ${General::swroot}/ovpn/certs/$cgiparams{'NAME'}cert.pem`;
-	    $temp =~ /Subject:.*CN=(.*)[\n]/;
+	    $temp =~ /Subject:.*CN\s?=\s?(.*)[\n]/;
 	    $temp = $1;
 	    $temp =~ s+/Email+, E+;
 	    $temp =~ s/ ST=/ S=/;
@@ -4051,7 +4061,7 @@ if ($cgiparams{'TYPE'} eq 'net') {
 		$errormessage = $Lang::tr{'cant change certificates'};
 		goto VPNCONF_ERROR;
 	    }
-	    if (ref ($cgiparams{'FH'}) ne 'Fh') {
+	    unless (ref ($cgiparams{'FH'})) {
 		$errormessage = $Lang::tr{'there was no file upload'};
 		goto VPNCONF_ERROR;
 	    }
@@ -4089,7 +4099,7 @@ if ($cgiparams{'TYPE'} eq 'net') {
 	    }
 
 	    my $temp = `/usr/bin/openssl x509 -text -in ${General::swroot}/ovpn/certs/$cgiparams{'NAME'}cert.pem`;
-	    $temp =~ /Subject:.*CN=(.*)[\n]/;
+	    $temp =~ /Subject:.*CN\s?=\s?(.*)[\n]/;
 	    $temp = $1;
 	    $temp =~ s+/Email+, E+;
 	    $temp =~ s/ ST=/ S=/;
@@ -4157,10 +4167,28 @@ if ($cgiparams{'TYPE'} eq 'net') {
 		$errormessage = $Lang::tr{'passwords do not match'};
 		goto VPNCONF_ERROR;
 	    }
-	    if ($cgiparams{'DAYS_VALID'} ne '' && $cgiparams{'DAYS_VALID'} !~ /^[0-9]+$/) {
+	    if ($cgiparams{'DAYS_VALID'} eq '' && $cgiparams{'DAYS_VALID'} !~ /^[0-9]+$/) {
 		$errormessage = $Lang::tr{'invalid input for valid till days'};
 		goto VPNCONF_ERROR;
 	    }
+
+	    # Check for RW that OpenSSL maximum of valid days will not be exceeded
+	    if ($cgiparams{'TYPE'} eq 'host') {
+		if ($cgiparams{'DAYS_VALID'} >= '999999') {
+			$errormessage = $Lang::tr{'invalid input for valid till days'};
+			goto VPNCONF_ERROR;
+		}
+	    }
+
+		# Check for RW if client name is already set
+		if ($cgiparams{'TYPE'} eq 'host') {
+			foreach my $key (keys %confighash) {
+				if ($confighash{$key}[1] eq $cgiparams{'NAME'}) {
+					$errormessage = $Lang::tr{'a connection with this name already exists'};
+					goto VPNCONF_ERROR;
+				}
+			}
+		}
 
 	    # Replace empty strings with a .
 	    (my $ou = $cgiparams{'CERT_OU'}) =~ s/^\s*$/\./;
@@ -4433,7 +4461,7 @@ if ($cgiparams{'TYPE'} eq 'net') {
 	$cgiparams{'CERT_CITY'}         = $vpnsettings{'ROOTCERT_CITY'};
 	$cgiparams{'CERT_STATE'}        = $vpnsettings{'ROOTCERT_STATE'};
 	$cgiparams{'CERT_COUNTRY'}      = $vpnsettings{'ROOTCERT_COUNTRY'};
-	$cgiparams{'DAYS_VALID'}     	= $vpnsettings{'DAYS_VALID'};
+	$cgiparams{'DAYS_VALID'}     	= $vpnsettings{'DAYS_VALID'} = '730';
     }
 
     VPNCONF_ERROR:
@@ -4504,12 +4532,10 @@ if ($cgiparams{'TYPE'} eq 'net') {
     $selected{'DAUTH'}{'SHA384'} = '';
     $selected{'DAUTH'}{'SHA256'} = '';
     $selected{'DAUTH'}{'SHA1'} = '';
-    # If no hash algorythm has been choosen yet, select
-    # the old default value (SHA1) for compatiblity reasons.
-    if ($cgiparams{'DAUTH'} eq '') {
-	$cgiparams{'DAUTH'} = 'SHA1';
-    }
     $selected{'DAUTH'}{$cgiparams{'DAUTH'}} = 'SELECTED';
+    $checked{'TLSAUTH'}{'off'} = '';
+    $checked{'TLSAUTH'}{'on'} = '';
+    $checked{'TLSAUTH'}{$cgiparams{'TLSAUTH'}} = 'CHECKED';
 
     if (1) {
 	&Header::showhttpheaders();
@@ -4813,7 +4839,7 @@ END
 if ($cgiparams{'TYPE'} eq 'host') {
 	print <<END;
 	</select></td></tr>
-		<td>&nbsp;</td><td class='base'>$Lang::tr{'valid till'} (days):</td>
+		<td>&nbsp;</td><td class='base'>$Lang::tr{'valid till'} (days):&nbsp;<img src='/blob.gif' alt='*' /</td>
 		<td class='base' nowrap='nowrap'><input type='text' name='DAYS_VALID' value='$cgiparams{'DAYS_VALID'}' size='32' $cakeydisabled /></td></tr>
 		<tr><td>&nbsp;</td>
 		<td class='base'>$Lang::tr{'pkcs12 file password'}:</td>
@@ -4828,7 +4854,7 @@ END
 }else{
 	print <<END;
 	</select></td></tr>
-		<td>&nbsp;</td><td class='base'>$Lang::tr{'valid till'} (days):</td>
+		<td>&nbsp;</td><td class='base'>$Lang::tr{'valid till'} (days):&nbsp;<img src='/blob.gif' alt='*' /</td>
 		<td class='base' nowrap='nowrap'><input type='text' name='DAYS_VALID' value='$cgiparams{'DAYS_VALID'}' size='32' $cakeydisabled /></td></tr>
 		<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
 		<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
@@ -5045,8 +5071,20 @@ END
 		$cgiparams{'MSSFIX'} = 'off';
     }
 	if ($cgiparams{'DAUTH'} eq '') {
-		$cgiparams{'DAUTH'} = 'SHA512';
-    }
+		if (-z "${General::swroot}/ovpn/ovpnconfig") {
+			$cgiparams{'DAUTH'} = 'SHA512';
+		}
+		foreach my $key (keys %confighash) {
+			if ($confighash{$key}[3] ne 'host') {
+				$cgiparams{'DAUTH'} = 'SHA512';
+			} else {
+				$cgiparams{'DAUTH'} = 'SHA1';
+			}
+		}
+	}
+	if ($cgiparams{'TLSAUTH'} eq '') {
+		$cgiparams{'TLSAUTH'} = 'off';
+	}
     if ($cgiparams{'DOVPN_SUBNET'} eq '') {
 		$cgiparams{'DOVPN_SUBNET'} = '10.' . int(rand(256)) . '.' . int(rand(256)) . '.0/255.255.255.0';
     }
@@ -5089,6 +5127,10 @@ END
     $selected{'DAUTH'}{'SHA1'} = '';
     $selected{'DAUTH'}{$cgiparams{'DAUTH'}} = 'SELECTED';
 
+    $checked{'TLSAUTH'}{'off'} = '';
+    $checked{'TLSAUTH'}{'on'} = '';
+    $checked{'TLSAUTH'}{$cgiparams{'TLSAUTH'}} = 'CHECKED';
+
     $checked{'DCOMPLZO'}{'off'} = '';
     $checked{'DCOMPLZO'}{'on'} = '';
     $checked{'DCOMPLZO'}{$cgiparams{'DCOMPLZO'}} = 'CHECKED';
@@ -5108,6 +5150,20 @@ END
 	print "&nbsp;</class>\n";
 	&Header::closebox();
     }
+
+	if ($cryptoerror) {
+		&Header::openbox('100%', 'LEFT', $Lang::tr{'crypto error'});
+		print "<class name='base'>$cryptoerror";
+		print "&nbsp;</class>";
+		&Header::closebox();
+	}
+
+	if ($cryptowarning) {
+		&Header::openbox('100%', 'LEFT', $Lang::tr{'crypto warning'});
+		print "<class name='base'>$cryptowarning";
+		print "&nbsp;</class>";
+		&Header::closebox();
+	}
 
 	if ($warnmessage) {
 		&Header::openbox('100%', 'LEFT', $Lang::tr{'warning messages'});
@@ -5149,8 +5205,16 @@ END
     if (&haveOrangeNet()) {    
 	print "<tr><td class='boldbase'>$Lang::tr{'ovpn on orange'}</td>";
 	print "<td><input type='checkbox' name='ENABLED_ORANGE' $checked{'ENABLED_ORANGE'}{'on'} /></td>";
-    }	
-    print <<END;
+    }
+
+	print <<END;
+
+	<tr><td colspan='4'><br></td></tr>
+	<tr>
+		<td class'base'><b>$Lang::tr{'net config'}:</b></td>
+	</tr>
+    <tr><td colspan='1'><br></td></tr>
+
     <tr><td class='base' nowrap='nowrap' colspan='2'>$Lang::tr{'local vpn hostname/ip'}:<br /><input type='text' name='VPN_IP' value='$cgiparams{'VPN_IP'}' size='30' /></td>
 	<td class='boldbase' nowrap='nowrap' colspan='2'>$Lang::tr{'ovpn subnet'}<br /><input type='TEXT' name='DOVPN_SUBNET' value='$cgiparams{'DOVPN_SUBNET'}' size='30' /></td></tr>
     <tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'protocol'}</td>
@@ -5160,6 +5224,24 @@ END
         <td><input type='TEXT' name='DDEST_PORT' value='$cgiparams{'DDEST_PORT'}' size='5' /></td></tr>
     <tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'MTU'}&nbsp;</td>
         <td> <input type='TEXT' name='DMTU' VALUE='$cgiparams{'DMTU'}' size='5' /></td>
+    </tr>
+
+	<tr><td colspan='4'><br></td></tr>
+	<tr>
+		<td class'base'><b>$Lang::tr{'ovpn crypt options'}:</b></td>
+	</tr>
+	<tr><td colspan='1'><br></td></tr>
+
+	<tr>
+		<td class='base'>$Lang::tr{'ovpn ha'}</td>
+		<td><select name='DAUTH'>
+				<option value='whirlpool'		$selected{'DAUTH'}{'whirlpool'}>Whirlpool (512 $Lang::tr{'bit'})</option>
+				<option value='SHA512'			$selected{'DAUTH'}{'SHA512'}>SHA2 (512 $Lang::tr{'bit'})</option>
+				<option value='SHA384'			$selected{'DAUTH'}{'SHA384'}>SHA2 (384 $Lang::tr{'bit'})</option>
+				<option value='SHA256'			$selected{'DAUTH'}{'SHA256'}>SHA2 (256 $Lang::tr{'bit'})</option>
+				<option value='SHA1'			$selected{'DAUTH'}{'SHA1'}>SHA1 (160 $Lang::tr{'bit'}, $Lang::tr{'vpn weak'})</option>
+			</select>
+		</td>
 
 		<td class='boldbase' nowrap='nowrap'>$Lang::tr{'cipher'}</td>
 		<td><select name='DCIPHER'>
@@ -5180,9 +5262,14 @@ END
 				<option value='CAST5-CBC' $selected{'DCIPHER'}{'CAST5-CBC'}>CAST5-CBC (128 $Lang::tr{'bit'}, $Lang::tr{'vpn weak'})</option>
 			</select>
 		</td>
-    <tr><td class='boldbase' nowrap='nowrap'>$Lang::tr{'comp-lzo'}</td>
-        <td><input type='checkbox' name='DCOMPLZO' $checked{'DCOMPLZO'}{'on'} /></td>
 	</tr>
+
+    <tr><td colspan='4'><br></td></tr>
+	<tr>
+		<td class='base'>$Lang::tr{'ovpn tls auth'}</td>
+		<td><input type='checkbox' name='TLSAUTH' $checked{'TLSAUTH'}{'on'} /></td>
+	</tr>
+
     <tr><td colspan='4'><br><br></td></tr>
 END
 ;				   

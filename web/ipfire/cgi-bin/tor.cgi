@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2013-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -23,8 +23,8 @@ use strict;
 use Locale::Codes::Country;
 
 # enable only the following on debugging purpose
-use warnings;
-use CGI::Carp 'fatalsToBrowser';
+#use warnings;
+#use CGI::Carp 'fatalsToBrowser';
 
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/geoip-functions.pl";
@@ -36,10 +36,10 @@ my @dummy = ( ${Header::colouryellow} );
 undef (@dummy);
 
 my @bandwidth_limits = (
-	1000 * 1024, # 1G
+	1000 * 1024, # 1 GBit/s
 	 500 * 1024,
 	 200 * 1024,
-	 100 * 1024, # 100M
+	 100 * 1024, # 100 MBit/s
 	  64 * 1024,
 	  50 * 1024,
 	  25 * 1024,
@@ -49,10 +49,7 @@ my @bandwidth_limits = (
 	   8 * 1024,
 	   4 * 1024,
 	   2 * 1024,
-	       1024, # 1M
-	        512,
-	        256,
-	        160
+	       1024  # 1 MBit/s
 );
 my @accounting_periods = ('daily', 'weekly', 'monthly');
 
@@ -519,7 +516,7 @@ END
 					<tr>
 						<td width='40%' class='base'>$Lang::tr{'tor relay fingerprint'}:</td>
 						<td width='60%'>
-							<a href='https://atlas.torproject.org/#details/$fingerprint' target='_blank'>$fingerprint</a>
+							<a href='https://metrics.torproject.org/rs.html#details/$fingerprint' target='_blank'>$fingerprint</a>
 						</td>
 					</tr>
 END
@@ -612,7 +609,7 @@ END
 				print <<END;
 					<tr>
 						<td width='40%'>
-							<a href='https://atlas.torproject.org/#details/$node->{'fingerprint'}' target='_blank'>
+							<a href='https://metrics.torproject.org/rs.html#details/$node->{'fingerprint'}' target='_blank'>
 								$node->{'name'}
 							</a>
 						</td>
